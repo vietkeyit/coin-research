@@ -6,15 +6,15 @@ import {
 } from "@reown/appkit/react";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { useConfig, useSwitchChain } from "wagmi";
+import { useConfig, /*useSwitchChain*/ } from "wagmi";
 import { getBalance } from "wagmi/actions";
 
 export default function ConnectWailletButton() {
   const { open } = useAppKit();
   const { disconnect } = useDisconnect();
   const { isConnected, status, address } = useAppKitAccount();
-  const { caipNetwork, caipNetworkId, chainId, switchNetwork } = useAppKitNetwork()
-  const { switchChain } = useSwitchChain();
+  const { caipNetwork, caipNetworkId, chainId } = useAppKitNetwork()
+  // const { switchChain } = useSwitchChain();
 
   const [balance, setBalance] = useState<{
     formatted: string;
