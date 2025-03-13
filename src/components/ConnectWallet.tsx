@@ -1,21 +1,20 @@
 import {
   useAppKit,
   useAppKitAccount,
-  useAppKitNetwork,
   useDisconnect,
 } from "@reown/appkit/react";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { useConfig, /*useSwitchChain*/ } from "wagmi";
+import { useConfig } from "wagmi";
 import { getBalance } from "wagmi/actions";
+import { displayWalletAddress, formatWalletAddress } from "../utils/utils";
+import ActionWallet from "./ActionWallet";
 
 export default function ConnectWailletButton() {
   const { open } = useAppKit();
   const { disconnect } = useDisconnect();
   const { isConnected, status, address } = useAppKitAccount();
-  const { caipNetwork, caipNetworkId, chainId } = useAppKitNetwork()
-  // const { switchChain } = useSwitchChain();
-
+  const [isShowAction, setIsShowAction] = useState(false);
   const [balance, setBalance] = useState<{
     formatted: string;
     symbol: string;
@@ -37,9 +36,8 @@ export default function ConnectWailletButton() {
   const getBalanceData = async (address: string) => {
     try {
       const balance = await getBalance(config, {
-        address: `0x${address.toString().replace(/^0x/, "")}`,
+        address: formatWalletAddress(address),
       });
-      console.log(balance.formatted, balance.symbol);
       setBalance({
         formatted: balance.formatted,
         symbol: balance.symbol,
@@ -50,6 +48,60 @@ export default function ConnectWailletButton() {
     }
   };
 
+  const renderAccountInfo = () => {
+    return (
+      <section
+        style={{
+          padding: "20px",
+          border: "1px solid #ddd",
+          borderRadius: "10px",
+          display: "flex",
+          flexDirection: isShowAction ? "row" : "column",
+          gap: "20px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+          }}
+        >
+          <div>
+            <button
+              style={{ border: "1px solid #ddd" }}
+              onClick={() => setIsShowAction(true)}
+            >
+              Action Wallet (Send)
+            </button>
+            <section>
+              <p>Địa chỉ: {displayWalletAddress(address)}</p>
+              <p>
+                Số dư MATIC: {balance?.formatted} {balance?.symbol}
+              </p>
+            </section>
+          </div>
+          <button
+            style={{ border: "1px solid #ddd" }}
+            onClick={handleCloseConnect}
+          >
+            Disconnect Wallet
+          </button>
+        </div>
+      </section>
+    );
+  };
+
+  const renderActionWallet = () => {
+    const handleVisibleAction = () => {
+      if (address) {
+        setIsShowAction(false);
+        getBalanceData(address);
+      }
+    };
+    return <ActionWallet setOpen={handleVisibleAction} />;
+  };
+
   useEffect(() => {
     if (address && status === "connected") {
       toast.success("Kết nối ví thành công", { icon: "🚀" });
@@ -57,27 +109,14 @@ export default function ConnectWailletButton() {
     }
   }, [address]);
 
-  useEffect(() => {
-    if (chainId) {
-      console.log("Switching chain to", caipNetwork, caipNetworkId, chainId);
-    }
-  }, [chainId]);
-
   return (
     <div>
       {isConnected ? (
-        <>
-          <div>
-            <span>Địa chỉ: {address}</span>
-            <div>Thông tin số dư:</div>
-            <p>
-              Số dư MATIC: {balance?.formatted} {balance?.symbol}
-            </p>
-          </div>
-          <button onClick={handleCloseConnect}>Disconnect Wallet</button>
-        </>
+        <>{isShowAction ? renderActionWallet() : renderAccountInfo()}</>
       ) : (
-        <button onClick={handleConnect}>Connect Wallet</button>
+        <button style={{ border: "1px solid #ddd" }} onClick={handleConnect}>
+          Connect Wallet
+        </button>
       )}
     </div>
   );
