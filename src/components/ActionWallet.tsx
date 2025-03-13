@@ -10,6 +10,7 @@ import {
 import { isAddress, parseEther } from "viem";
 import { displayWalletAddress, formatWalletAddress } from "../utils/utils";
 import Spinner from "../share/spinner";
+import arrowLeft from '../assets/arrow-left.svg';
 
 interface ActionWalletProps {
   readonly setOpen: (open: boolean) => void;
@@ -127,7 +128,7 @@ export default function ActionWallet({ setOpen }: ActionWalletProps) {
           }}
         >
           <img
-            src="../src/assets/arrow-left.svg"
+            src={arrowLeft}
             alt="back_button"
             width={24}
             height={24}
