@@ -1,6 +1,6 @@
 import { createAppKit } from "@reown/appkit/react";
 
-import { WagmiProvider } from "wagmi";
+import { cookieStorage, createStorage, WagmiProvider } from "wagmi";
 import { AppKitNetwork, arbitrum, mainnet, polygon, bsc } from "@reown/appkit/networks";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
@@ -28,6 +28,9 @@ const wagmiAdapter = new WagmiAdapter({
   networks,
   projectId,
   ssr: true,
+  storage: createStorage({
+    storage: cookieStorage
+  })
 });
 
 // 5. Create modal

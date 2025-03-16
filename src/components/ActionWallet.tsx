@@ -2,28 +2,58 @@ import { useEffect, useState } from "react";
 import {
   useAccount,
   useBalance,
-  useEstimateGas,
-  useGasPrice,
   useSendTransaction,
   useWaitForTransactionReceipt,
+  useGasPrice,
+  useEstimateGas,
+  useReadContract,
 } from "wagmi";
-import { isAddress, parseEther } from "viem";
+import {
+  encodeFunctionData,
+  erc20Abi,
+  isAddress,
+  parseEther,
+  parseUnits,
+} from "viem";
 import { displayWalletAddress, formatWalletAddress } from "../utils/utils";
-import Spinner from "../share/spinner";
-import arrowLeft from '../assets/arrow-left.svg';
+import { useAppKitNetwork } from "@reown/appkit/react";
+import arrowLeft from "../assets/arrow-left.svg";
+import { TOKENBYCHAIN, USDT_CONTRACTS } from "../utils/constants";
+import { BadgeInfo } from "lucide-react";
+import { Tooltip } from "react-tooltip";
+import toast from "react-hot-toast";
 
 interface ActionWalletProps {
   readonly setOpen: (open: boolean) => void;
+  readonly setLoadingTransition: (loading: boolean) => void;
 }
 
-export default function ActionWallet({ setOpen }: ActionWalletProps) {
+export default function ActionWallet({
+  setOpen,
+  setLoadingTransition,
+}: ActionWalletProps) {
   const { address } = useAccount(); // Lấy địa chỉ ví
-  const { data: balanceData, refetch } = useBalance({ address }); // Lấy số dư MATIC
+  const data = useAppKitNetwork();
 
-  const [toAddress, setToAddress] = useState(""); // Địa chỉ nhận
-  const [amount, setAmount] = useState(0); // Số lượng MATIC
-  const [statusMessage, setStatusMessage] = useState(""); // Thông báo trạng thái
-  const [error, setError] = useState(""); // Lỗi
+  const { chainId } = useAppKitNetwork();
+  // Lấy số dư MATIC
+  const { data: balanceMaticData, refetch } = useBalance({
+    address,
+    chainId: typeof data?.chainId === "number" ? data.chainId : undefined,
+  });
+
+  // Lấy số dư contract USDT
+  const { data: balancaContractData, refetch: refetchContract } =
+    useReadContract({
+      abi: erc20Abi,
+      address: formatWalletAddress(
+        USDT_CONTRACTS[data.chainId as keyof typeof USDT_CONTRACTS]
+      ),
+      functionName: "balanceOf",
+      args: [formatWalletAddress(address)], // Lấy số dư của user
+      chainId: typeof data?.chainId === "number" ? data.chainId : undefined,
+    });
+
   const {
     data: txData,
     sendTransaction,
@@ -31,30 +61,83 @@ export default function ActionWallet({ setOpen }: ActionWalletProps) {
   } = useSendTransaction();
   const { data: gasPrice } = useGasPrice();
 
-  // Ước tính phí gas
-  const { data: gasEstimate } = useEstimateGas(
-    toAddress && isAddress(toAddress)
-      ? {
-          to: formatWalletAddress(toAddress),
-          value: amount ? parseEther(amount.toString()) : BigInt(0),
-        }
-      : undefined
-  );
+  // balaceData common
+  const [balanceData, setBalanceData] = useState<
+    | {
+        decimals: number;
+        formatted: string;
+        symbol: string;
+        value: bigint;
+      }
+    | undefined
+  >();
+  const [isShowTokenBalances, setIsShowTokenBalances] = useState(false);
+  const [toAddress, setToAddress] = useState(""); // Địa chỉ nhận
+  const [amount, setAmount] = useState(0); // Số lượng MATIC
+  const [error, setError] = useState(""); // Lỗi
+  const [isNativeToken, setIsNativeToken] = useState(true); // Token mặc định là MATIC
+  const [tokenSelected, setTokenSelected] = useState<string>();
+
+  const isReady =
+    toAddress &&
+    amount &&
+    address &&
+    USDT_CONTRACTS[data.chainId as keyof typeof USDT_CONTRACTS];
+
+  // Nếu chưa đủ điều kiện, không truyền `data`
+  const getDataERC20EstimateGas = () => {
+    return isReady
+      ? encodeFunctionData({
+          abi: erc20Abi,
+          functionName: "transfer",
+          args: [
+            formatWalletAddress(toAddress),
+            parseUnits(amount.toString(), 6),
+          ],
+        })
+      : undefined;
+  };
+
+  const { data: gasEstimate } = useEstimateGas({
+    account: address,
+    to: isNativeToken
+      ? formatWalletAddress(toAddress)
+      : formatWalletAddress(
+          USDT_CONTRACTS[data.chainId as keyof typeof USDT_CONTRACTS]
+        ),
+    value: isNativeToken ? parseEther(Number(amount).toFixed(18)) : undefined,
+    data: isNativeToken ? undefined : getDataERC20EstimateGas(),
+  });
 
   // Theo dõi giao dịch sau khi gửi
   const { isSuccess, isError, isLoading } = useWaitForTransactionReceipt({
     hash: txData,
   });
 
-  const isLoadingSendTransaction = sendTransactionStatus === "pending";
-  const handleChangeAmount = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-
+  /**
+   * kiểm tra số dư có đủ không
+   * @param value
+   */
+  const checkBalanceEnough = (value: string) => {
     // số dư không đủ
     if (balanceData && parseFloat(balanceData?.formatted) < parseFloat(value)) {
-      setError("Số dư không đủ");
+      return false;
     } else {
+      return true;
+    }
+  };
+
+  /**
+   * Thay đổi số lượng token gửi
+   * @param e
+   */
+  const handleChangeAmount = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const isEnough = checkBalanceEnough(value);
+    if (isEnough) {
       setError("");
+    } else {
+      setError("Số dư không đủ");
     }
 
     setAmount(+value);
@@ -65,46 +148,165 @@ export default function ActionWallet({ setOpen }: ActionWalletProps) {
       return;
     }
 
-    // Gửi giao dịch
-    sendTransaction({
-      to: formatWalletAddress(toAddress),
-      value: parseEther(amount.toString()), // Chuyển đổi số MATIC sang wei
-    });
+    // Gửi giao dịch cho token native hoặc token khác
+    if (isNativeToken) {
+      sendTransaction({
+        to: formatWalletAddress(toAddress),
+        value: parseEther(amount.toString()), // Chuyển đổi số MATIC sang wei
+      });
+    } else {
+      const encodeData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "transfer",
+        args: [
+          formatWalletAddress(toAddress),
+          parseUnits(amount.toString(), 6),
+        ], // USDT có 6 decimal, POL có 18 decimal
+      });
+
+      sendTransaction({
+        to: formatWalletAddress(
+          USDT_CONTRACTS[data.chainId as keyof typeof USDT_CONTRACTS]
+        ), // Gửi đến contract của token
+        data: encodeData, // Chứa calldata để gọi hàm transfer
+      });
+    }
+  };
+
+  const renderBalanceStatus = () => {
+    if (!balanceData || !isShowTokenBalances) {
+      return "Đang tải...";
+    }
+
+    return balanceData.formatted + " " + balanceData.symbol;
+  };
+
+  const getFormatContractBalance = (balance: bigint | undefined) => {
+    return {
+      decimals: 6,
+
+      // deprecated but need to refactor
+      formatted: (Number(balance) / 10 ** 6).toString(),
+      symbol: "USDT",
+      value: balance ? BigInt(balance) : BigInt(0),
+    };
+  };
+
+  const handleChangeToken = (_tokenSelected: string) => {
+    setIsShowTokenBalances(false);
+    setTokenSelected(_tokenSelected);
+    if (_tokenSelected === "USDT") {
+      const _balanceContratData = getFormatContractBalance(balancaContractData);
+      setBalanceData(_balanceContratData);
+      setIsShowTokenBalances(true);
+      setIsNativeToken(false);
+    } else {
+      setBalanceData(balanceMaticData);
+      setIsShowTokenBalances(true);
+      setIsNativeToken(true);
+    }
+  };
+
+  const refetchBalance = () => {
+    if (isNativeToken) {
+      refetch(); // Cập nhật số dư sau giao dịch
+    } else {
+      refetchContract(); // Cập nhật số dư USDT sau giao dịch
+    }
+  };
+
+  /**
+   * lấy thông tin token theo mạng
+   */
+  const getTokenListByChain = () => {
+    if (chainId) {
+      const _chainId: number = +chainId;
+      return TOKENBYCHAIN[_chainId as keyof typeof TOKENBYCHAIN];
+    }
+    return [];
   };
 
   useEffect(() => {
-    if (balanceData && gasEstimate && gasPrice) {
+    if (address) {
+      const balances = getTokenListByChain();
+      if (balances.length > 0) {
+        handleChangeToken(balances[0].name);
+      }
+    }
+  }, [address]);
+
+  useEffect(() => {
+    const isEnough = checkBalanceEnough(amount.toString());
+    if (!isEnough) {
+      setError("Số dư không đủ");
+      return;
+    }
+
+    if (balanceData && gasEstimate && gasPrice && balanceMaticData) {
       const estimatedGasFee = gasEstimate * gasPrice; // Tính phí gas
 
-      // Kiểm tra xem số dư có đủ không (tổng chi phí = số tiền gửi + phí gas)
-      const totalCost = parseEther(amount.toString()) + estimatedGasFee;
-      const isInvalidGasFee = balanceData.value < totalCost;
+      // Xác định tổng chi phí cần thanh toán
+      const totalCost = isNativeToken
+        ? parseEther(amount.toString()) + estimatedGasFee
+        : estimatedGasFee;
+
+      // Kiểm tra xem số dư native token có đủ không(cần so sánh với số dư MATIC)
+      const isInvalidGasFee = balanceMaticData.value < totalCost;
       setError(isInvalidGasFee ? "Không đủ tiền thanh toán phí gas" : "");
     }
-  }, [balanceData, gasEstimate, gasPrice]);
+  }, [balanceData, gasEstimate, gasPrice, balanceMaticData]);
 
   // Theo dõi khi giao dịch thành công
   useEffect(() => {
     if (isSuccess) {
-      setStatusMessage(`✅ Giao dịch thành công!`);
-      refetch(); // Cập nhật số dư sau giao dịch
+      toast.success(`Giao dịch thành công!`);
+      refetchBalance();
       setToAddress("");
       setAmount(0);
     }
-  }, [isSuccess, txData]);
+  }, [isSuccess]);
 
   useEffect(() => {
     if (isError) {
-      setStatusMessage(`❌ Giao dịch thất bại!`);
-      refetch(); // Cập nhật số dư sau giao dịch
+      toast.error(`Giao dịch thất bại!`);
+      refetchBalance();
     }
   }, [isError]);
+
+  useEffect(() => {
+    if (sendTransactionStatus === "pending") {
+      setLoadingTransition(true);
+    } else {
+      setLoadingTransition(false);
+    }
+  }, [sendTransactionStatus]);
+
+  useEffect(() => {
+    if (balanceMaticData && isNativeToken) {
+      setBalanceData(balanceMaticData);
+    }
+  }, [balanceMaticData, isNativeToken]);
+
+  useEffect(() => {
+    if (balancaContractData && !isNativeToken) {
+      const _balanceContratData = getFormatContractBalance(balancaContractData);
+      setBalanceData(_balanceContratData);
+    }
+  }, [balancaContractData, isNativeToken]);
+
+  // khi thay đổi địa chỉ thì cập nhật số dư MATIC và load nó lên
+  useEffect(() => {
+    if (address) {
+      setBalanceData(balanceMaticData);
+    }
+  }, [address]);
 
   return (
     <div
       style={{
         padding: "20px",
         maxWidth: "400px",
+        minWidth: "300px",
         margin: "auto",
         border: "1px solid #ddd",
         borderRadius: "10px",
@@ -127,17 +329,12 @@ export default function ActionWallet({ setOpen }: ActionWalletProps) {
             marginTop: 0,
           }}
         >
-          <img
-            src={arrowLeft}
-            alt="back_button"
-            width={24}
-            height={24}
-          />
+          <img src={arrowLeft} alt="back_button" width={24} height={24} />
         </button>
         <div
           style={{ marginTop: 0, marginBottom: 5, fontSize: 20, width: "100%" }}
         >
-          <strong style={{ marginRight: 25 }}>Gửi MATIC</strong>
+          <strong style={{ marginRight: 25 }}>Giao dịch</strong>
         </div>
       </div>
       <div
@@ -149,16 +346,35 @@ export default function ActionWallet({ setOpen }: ActionWalletProps) {
           flexDirection: "column",
         }}
       >
-        <p>
+        <p style={{ display: "flex", justifyContent: "center", gap: 5 }}>
           <b>Thông tin gửi</b>
+          <BadgeInfo
+            data-tooltip-id="transaction-tooltip"
+            data-tooltip-content="Có thể giao dịch với USDT"
+          />
         </p>
-        <p style={{ textAlign: "left", marginTop: 0 }}>
-          <strong>Nguồn:</strong>{" "}
+        <p style={{ textAlign: "left", marginTop: 0, marginBottom: 5 }}>
+          <strong>Nguồn: </strong>
           {address ? displayWalletAddress(address) : "Chưa kết nối"}
           <br />
-          <strong>Số dư:</strong> {balanceData?.formatted} {balanceData?.symbol}
+          <strong>Token: </strong>
+          <select
+            value={tokenSelected}
+            onChange={(e) => handleChangeToken(e.target.value)}
+            disabled={isLoading}
+          >
+            {getTokenListByChain().map((balance, index) => (
+              <option key={`${index}-${balance.name}`} value={balance.name}>
+                {balance.name}
+              </option>
+            ))}
+          </select>
         </p>
-        {error && <p style={{ color: "red", marginTop: "10px" }}>{error}</p>}
+        <span style={{ textAlign: "left" }}>
+          <b>Số dư: </b>
+          {renderBalanceStatus()}
+        </span>
+        {error && <span style={{ color: "red" }}>{error}</span>}
       </div>
       <div
         style={{
@@ -226,13 +442,7 @@ export default function ActionWallet({ setOpen }: ActionWalletProps) {
           Hủy
         </button>
       </div>
-      {isSuccess && (
-        <p style={{ color: "green", marginTop: "10px" }}>{statusMessage}</p>
-      )}
-      {isError && (
-        <p style={{ color: "red", marginTop: "10px" }}>{statusMessage}</p>
-      )}
-      {isLoadingSendTransaction && <Spinner />}
+      <Tooltip id="transaction-tooltip" />
     </div>
   );
 }

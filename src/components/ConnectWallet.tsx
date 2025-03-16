@@ -4,17 +4,24 @@ import {
   useDisconnect,
 } from "@reown/appkit/react";
 import { useEffect, useState } from "react";
-import toast from "react-hot-toast";
-import { useConfig } from "wagmi";
+import { useAccount, useConfig } from "wagmi";
 import { getBalance } from "wagmi/actions";
 import { displayWalletAddress, formatWalletAddress } from "../utils/utils";
+import { ArrowLeftRight, PlugZap, Settings, Unplug } from "lucide-react";
 import ActionWallet from "./ActionWallet";
+import AddUSDTContract from "./USDTToken/AddContract";
+import Spinner from "../share/spinner";
+import toast from "react-hot-toast";
+import { formatUnits } from "viem";
 
 export default function ConnectWailletButton() {
-  const { open } = useAppKit();
+  const { open, close } = useAppKit();
   const { disconnect } = useDisconnect();
   const { isConnected, status, address } = useAppKitAccount();
+  const { chain } = useAccount();
+  const [isChangeNetwork, setIsChangeNetwork] = useState(false);
   const [isShowAction, setIsShowAction] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [balance, setBalance] = useState<{
     formatted: string;
     symbol: string;
@@ -33,13 +40,26 @@ export default function ConnectWailletButton() {
     toast.error("Đã ngắt kết nối ví", { icon: "🔥" });
   };
 
+  const handleSwitchNetwork = () => {
+    open({
+      view: "Networks",
+      namespace: "eip155", // connect to Ethereum
+    });
+    setIsChangeNetwork(true);
+  };
+
+  const handleLoading = (isLoading: boolean) => {
+    setIsLoading(isLoading);
+  };
+
   const getBalanceData = async (address: string) => {
     try {
       const balance = await getBalance(config, {
         address: formatWalletAddress(address),
+        chainId: chain?.id,
       });
       setBalance({
-        formatted: balance.formatted,
+        formatted: formatUnits(balance.value, balance.decimals),
         symbol: balance.symbol,
       });
     } catch (error) {
@@ -67,26 +87,44 @@ export default function ConnectWailletButton() {
             justifyContent: "center",
           }}
         >
-          <div>
-            <button
-              style={{ border: "1px solid #ddd" }}
-              onClick={() => setIsShowAction(true)}
-            >
-              Action Wallet (Send)
-            </button>
-            <section>
-              <p>Địa chỉ: {displayWalletAddress(address)}</p>
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+          >
+            <div style={{ display: "flex", gap: "10px", justifyContent: "space-between" }}>
+              <button onClick={() => setIsShowAction(true)}>
+                <ArrowLeftRight />
+                Transaction
+              </button>
+              <AddUSDTContract setAddLoading={handleLoading} />
+            </div>
+            <section style={{ textAlign: "left" }}>
               <p>
-                Số dư MATIC: {balance?.formatted} {balance?.symbol}
+                <b>Địa chỉ:</b> {displayWalletAddress(address)}
+              </p>
+              <p>
+                <b>Số dư:</b> {balance?.formatted} {balance?.symbol}
+              </p>
+              <p
+                style={{
+                  display: "flex",
+                  justifyItems: "center",
+                  alignItems: "center",
+                }}
+              >
+                <b>Mạng hiện tại:&nbsp;</b> {chain?.name}
               </p>
             </section>
           </div>
-          <button
-            style={{ border: "1px solid #ddd" }}
-            onClick={handleCloseConnect}
-          >
-            Disconnect Wallet
-          </button>
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button onClick={handleSwitchNetwork}>
+              <Settings />
+              Switch Network
+            </button>
+            <button onClick={handleCloseConnect}>
+              <Unplug />
+              Disconnect Wallet
+            </button>
+          </div>
         </div>
       </section>
     );
@@ -99,7 +137,13 @@ export default function ConnectWailletButton() {
         getBalanceData(address);
       }
     };
-    return <ActionWallet setOpen={handleVisibleAction} />;
+
+    return (
+      <ActionWallet
+        setOpen={handleVisibleAction}
+        setLoadingTransition={handleLoading}
+      />
+    );
   };
 
   useEffect(() => {
@@ -109,12 +153,27 @@ export default function ConnectWailletButton() {
     }
   }, [address]);
 
+  useEffect(() => {
+    if (chain && address) {
+      close();
+      if (isChangeNetwork) {
+        getBalanceData(address);
+        toast.success(`Mạng đang active: ${chain.name}`, { icon: "🚀" });
+        setIsChangeNetwork(false);
+      }
+    }
+  }, [chain, address]);
+
   return (
     <div>
       {isConnected ? (
-        <>{isShowAction ? renderActionWallet() : renderAccountInfo()}</>
+        <>
+          {isShowAction ? renderActionWallet() : renderAccountInfo()}
+          {isLoading && <Spinner />}
+        </>
       ) : (
-        <button style={{ border: "1px solid #ddd" }} onClick={handleConnect}>
+        <button onClick={handleConnect}>
+          <PlugZap />
           Connect Wallet
         </button>
       )}
